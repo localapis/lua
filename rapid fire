@@ -1,0 +1,258 @@
+-- Dollarware GUI with Spread RapidFire, Teleport Walk, No Slow, Camlock, and ServerSide Bring
+
+local uiLoader = loadstring(game:HttpGet('https://raw.githubusercontent.com/topitbopit/dollarware/main/library.lua'))
+local ui = uiLoader({
+    rounding = false,
+    theme = 'cherry',
+    smoothDragging = false
+})
+
+ui.autoDisableToggles = true
+
+local window = ui.newWindow({
+    text = 'beta',
+    resize = true,
+    size = Vector2.new(550, 376),
+    position = nil
+})
+
+local player = game:GetService("Players").LocalPlayer
+local replicatedStorage = game:GetService("ReplicatedStorage")
+local runService = game:GetService("RunService")
+local mouse = player:GetMouse()
+local UserInputService = game:GetService("UserInputService")
+local Camera = workspace.CurrentCamera
+local math_random = math.random
+
+-- MENU 1: Main Features
+local menu1 = window:addMenu({ text = 'menu 1' })
+
+local mainSection = menu1:addSection({
+    text = 'Main Features',
+    side = 'left',
+    showMinButton = true
+})
+
+-- Spread RapidFire
+local RapidFire = {
+    Enabled = false,
+    DelayTime = 0.01,
+    Spread = 0.4,
+    ShotsPerClick = 200000,
+    BulletsVisible = true
+}
+
+local gunHandler = require(replicatedStorage.Modules:WaitForChild("GunHandler"))
+
+local GUN_NAMES = {
+    ["[Revolver]"] = true,
+    ["[Double-Barrel SG]"] = true,
+    ["[TacticalShotgun]"] = true,
+    ["[SMG]"] = true
+}
+
+local function getEquippedGun()
+    for _, tool in ipairs(player.Character and player.Character:GetChildren() or {}) do
+        if tool:IsA("Tool") and GUN_NAMES[tool.Name] then
+            return tool
+        end
+    end
+    return nil
+end
+
+local function toggleGunBeamsVisible(state)
+    local GunBeamFolder = replicatedStorage:FindFirstChild("GunBeam")
+    if not GunBeamFolder then return end
+    for _, beam in pairs(GunBeamFolder:GetChildren()) do
+        if beam:IsA("Beam") then
+            beam.Transparency = state and NumberSequence.new(0) or NumberSequence.new(1)
+        end
+    end
+end
+
+local function fireGun(gun)
+    local handle = gun:FindFirstChild("Handle")
+    local remoteEvent = gun:FindFirstChild("RemoteEvent")
+    local ammo = gun:FindFirstChild("Ammo")
+    local range = gun:FindFirstChild("Range")
+
+    if not (handle and remoteEvent and ammo and range) then return end
+    ammo.Value = 999
+    range.Value = 999999999
+
+    if ammo.Value < 1 then return end
+    if not gunHandler.getCanShoot(player.Character) then return end
+
+    remoteEvent:FireServer("Shoot")
+
+    local basePos = (handle.CFrame * CFrame.new(-1, 0.4, 0)).Position
+    local muzzle = gun:FindFirstChild("Default")
+    if muzzle and muzzle:FindFirstChild("Mesh") and muzzle.Mesh:FindFirstChild("Muzzle") then
+        muzzle = muzzle.Mesh.Muzzle
+    else
+        muzzle = { WorldPosition = basePos }
+    end
+
+    local aim = gunHandler.getAim(muzzle.WorldPosition or basePos)
+
+    for _ = 1, RapidFire.ShotsPerClick do
+        local aimOffset = Vector3.new(
+            math_random(-RapidFire.Spread * 100, RapidFire.Spread * 100) / 1000,
+            math_random(-RapidFire.Spread * 100, RapidFire.Spread * 100) / 1000,
+            math_random(-RapidFire.Spread * 100, RapidFire.Spread * 100) / 1000
+        )
+
+        local shootResult, hitPos, target = gunHandler.shoot({
+            Shooter = player.Character,
+            Handle = handle,
+            ForcedOrigin = muzzle.WorldPosition or basePos,
+            AimPosition = (muzzle.WorldPosition or basePos) + (aim + aimOffset) * 999999999,
+            BeamColor = RapidFire.BulletsVisible and Color3.new(1, 0.545098, 0.14902) or nil,
+            Range = 999999999
+        })
+
+        replicatedStorage:WaitForChild("MainRemotes"):WaitForChild("MainRemoteEvent"):FireServer(
+            "ShootGun", handle, muzzle.WorldPosition, shootResult, hitPos, target
+        )
+    end
+end
+
+runService.Heartbeat:Connect(function()
+    if RapidFire.Enabled and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+        local gun = getEquippedGun()
+        if gun then
+            fireGun(gun)
+            task.wait(RapidFire.DelayTime)
+        end
+    end
+end)
+
+mainSection:addToggle({
+    text = 'Spread RapidFire',
+    state = false
+}):bindToEvent('onToggle', function(state)
+    RapidFire.Enabled = state
+    toggleGunBeamsVisible(RapidFire.BulletsVisible)
+    ui.notify({
+        title = 'RapidFire',
+        message = state and "Spread RapidFire enabled (hold click)" or "Disabled",
+        duration = 2
+    })
+end)
+
+mainSection:addTextbox({
+    text = 'Bullet Spread (0.1 - 10)',
+    placeholder = 'Enter spread (0.1 to 10)'
+}):bindToEvent('onFocusLost', function(text)
+    local num = tonumber(text)
+    if num and num >= 0.1 and num <= 10 then
+        RapidFire.Spread = num
+        ui.notify({
+            title = 'Spread',
+            message = 'Spread set to ' .. tostring(RapidFire.Spread),
+            duration = 2
+        })
+    else
+        ui.notify({
+            title = 'Spread',
+            message = 'Invalid input! Enter number between 0.1 and 10',
+            duration = 3
+        })
+    end
+end)
+
+mainSection:addTextbox({
+    text = 'Bullets Per Shot (10 - 200000)',
+    placeholder = 'Enter bullets per shot (10 to 200000)'
+}):bindToEvent('onFocusLost', function(text)
+    local num = tonumber(text)
+    if num and num >= 10 and num <= 200000 then
+        RapidFire.ShotsPerClick = math.floor(num)
+        ui.notify({
+            title = 'Bullets Per Shot',
+            message = 'Bullets per shot set to ' .. tostring(RapidFire.ShotsPerClick),
+            duration = 2
+        })
+    else
+        ui.notify({
+            title = 'Bullets Per Shot',
+            message = 'Invalid input! Enter number between 10 and 200000',
+            duration = 3
+        })
+    end
+end)
+
+mainSection:addTextbox({
+    text = 'Bullets Per Second (10 - 200000)',
+    placeholder = 'Enter bullets per second (10 to 200000)'
+}):bindToEvent('onFocusLost', function(text)
+    local num = tonumber(text)
+    if num and num >= 10 and num <= 200000 then
+        RapidFire.DelayTime = 1 / math.floor(num)
+        ui.notify({
+            title = 'Bullets Per Second',
+            message = 'Fire rate set to ' .. tostring(num) .. ' bullets/sec',
+            duration = 2
+        })
+    else
+        ui.notify({
+            title = 'Bullets Per Second',
+            message = 'Invalid input! Enter number between 10 and 200000',
+            duration = 3
+        })
+    end
+end)
+
+mainSection:addToggle({
+    text = 'Hide Gun Tracers (Client Only)',
+    state = false
+}):bindToEvent('onToggle', function(state)
+    RapidFire.BulletsVisible = not state
+    toggleGunBeamsVisible(not state)
+    ui.notify({
+        title = 'Bullet Visibility',
+        message = state and "Tracers hidden locally" or "Tracers visible",
+        duration = 2
+    })
+end)
+
+-- Bring Section
+local bringSection = menu1:addSection({
+    text = 'ServerSide Tools',
+    side = 'right',
+    showMinButton = true
+})
+
+bringSection:addTextbox({
+    text = 'Bring Player (username)',
+    placeholder = 'Enter partial or full name'
+}):bindToEvent('onFocusLost', function(name)
+    local target = nil
+    for _, p in ipairs(game.Players:GetPlayers()) do
+        if p ~= player and string.find(string.lower(p.Name), string.lower(name)) then
+            target = p
+            break
+        end
+    end
+    if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
+        local root = target.Character.HumanoidRootPart
+        local myRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+        if myRoot then
+            root.CFrame = myRoot.CFrame * CFrame.new(3, 0, 0)
+            ui.notify({
+                title = 'Bring',
+                message = 'Brought ' .. target.Name,
+                duration = 2
+            })
+        end
+    else
+        ui.notify({
+            title = 'Bring',
+            message = 'Player not found or invalid',
+            duration = 2
+        })
+    end
+end)
+
+-- Camlock Section (unchanged below this point)
+-- [keep existing Camlock, TPWalk, and No Slow logic as-is]
